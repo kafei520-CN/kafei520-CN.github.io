@@ -1,0 +1,209 @@
+@media (max-width: 1024px) {
+  .page-shell {
+    width: min(100% - 20px, 1180px);
+    padding-top: 14px;
+  }
+
+  .site-header {
+    top: 8px;
+    width: min(100%, 860px);
+    padding: 10px 14px;
+  }
+
+  main {
+    gap: 18px;
+    padding-top: 18px;
+  }
+
+  .hero {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    gap: 18px;
+    padding: 18px;
+  }
+
+  .hero-copy {
+    min-height: auto;
+    overflow: visible;
+    padding: clamp(24px, 7vw, 42px);
+  }
+
+  h1 {
+    max-width: 100%;
+    font-size: clamp(3.4rem, 13vw, 6.6rem);
+    line-height: 1.06;
+  }
+
+  .profile-zone {
+    min-height: auto;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .profile-card,
+  .contribution-card {
+    width: min(100%, 640px);
+  }
+
+  .intro-grid,
+  .project-grid,
+  .post-item {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .page-shell {
+    width: min(100% - 16px, 100%);
+    padding-top: 8px;
+    padding-bottom: 28px;
+  }
+
+  .site-header,
+  .site-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .site-header {
+    border-radius: 24px;
+    gap: 10px;
+  }
+
+  .brand {
+    justify-content: center;
+    font-size: 0.95rem;
+  }
+
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+  }
+
+  .site-nav {
+    width: 100%;
+    justify-content: space-between;
+    gap: 4px;
+  }
+
+  .site-nav a {
+    flex: 1;
+    padding: 8px 6px;
+    text-align: center;
+  }
+
+  .hero {
+    gap: 12px;
+    padding: 10px;
+    border-radius: 22px;
+  }
+
+  .hero-copy,
+  .profile-zone {
+    border-radius: 20px;
+  }
+
+  .hero-copy {
+    padding: 20px 16px;
+  }
+
+  .eyebrow {
+    font-size: 0.66rem;
+    letter-spacing: 0.11em;
+  }
+
+  h1 {
+    font-size: clamp(3.1rem, 20vw, 4.8rem);
+    line-height: 1.02;
+  }
+
+  .hello-marquee {
+    margin: 14px 0 0;
+    padding: 8px 0;
+  }
+
+  .hello-track {
+    gap: 10px;
+    animation-duration: 36s;
+  }
+
+  .hello-track span {
+    gap: 8px;
+    padding: 5px 10px;
+    font-size: 0.88rem;
+  }
+
+  .hero-text {
+    margin-top: 14px;
+    font-size: 0.96rem;
+    line-height: 1.75;
+  }
+
+  .hero-actions {
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .button {
+    flex: 1 1 auto;
+    min-height: 42px;
+    padding: 0 14px;
+  }
+
+  .profile-zone {
+    padding: 14px;
+  }
+
+  .profile-card {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .profile-card img {
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+  }
+
+  .profile-card h2 {
+    font-size: 1.7rem;
+  }
+
+  .profile-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .contribution-card,
+  .intro-grid {
+    padding: 14px;
+  }
+
+  .contribution-frame img {
+    min-height: 88px;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .article-reader {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 380px) {
+  h1 {
+    font-size: clamp(2.75rem, 19vw, 3.6rem);
+  }
+
+  .site-nav a {
+    font-size: 0.92rem;
+  }
+}
