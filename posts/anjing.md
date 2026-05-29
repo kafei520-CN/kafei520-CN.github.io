@@ -1,6 +1,6 @@
 # Quietly
 
-`Quietly` 是一个面向 `Minecraft 1.21.1 ~ 1.21.10` 的服务端静默开箱模组，支持 `Fabric` 和 `NeoForge`。
+`Quietly` 是一个面向 `Minecraft 1.21.1 ~ 1.21.10` 的服务端静默开箱模组，支持 `Fabric` 和 `NeoForge` 和 `Bukkit`。
 
 它的目标很简单：
 
