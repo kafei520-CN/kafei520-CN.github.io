@@ -15,6 +15,11 @@
     padding-top: 18px;
   }
 
+  .content-section,
+  .site-footer {
+    width: 100%;
+  }
+
   .hero {
     grid-template-columns: 1fr;
     height: auto;
@@ -47,8 +52,6 @@
     width: min(100%, 640px);
   }
 
-  .intro-grid,
-  .project-grid,
   .post-item {
     grid-template-columns: 1fr;
   }
@@ -98,6 +101,10 @@
     text-align: center;
   }
 
+  .project-grid {
+    grid-template-columns: 1fr;
+  }
+
   .hero {
     gap: 12px;
     padding: 10px;
@@ -121,6 +128,7 @@
   h1 {
     font-size: clamp(3.1rem, 20vw, 4.8rem);
     line-height: 1.02;
+    margin-top: 8px;
   }
 
   .hello-marquee {
@@ -179,8 +187,7 @@
     grid-template-columns: 1fr 1fr;
   }
 
-  .contribution-card,
-  .intro-grid {
+  .contribution-card {
     padding: 14px;
   }
 

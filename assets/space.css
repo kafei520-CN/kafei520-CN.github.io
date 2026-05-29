@@ -1,0 +1,50 @@
+body {
+  background:
+    radial-gradient(circle at 12% 12%, rgba(184, 92, 52, 0.24), transparent 28rem),
+    radial-gradient(circle at 84% 20%, rgba(87, 124, 93, 0.26), transparent 30rem),
+    radial-gradient(circle at 48% 86%, rgba(255, 247, 222, 0.42), transparent 34rem),
+    linear-gradient(135deg, #efe2ce 0%, #d9c7a8 44%, #aeb6a1 100%);
+}
+
+body::before,
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+}
+
+body::before {
+  opacity: 0.5;
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 250, 0.86) 0 1px, transparent 1.5px),
+    radial-gradient(circle, rgba(89, 105, 81, 0.32) 0 1px, transparent 1.6px);
+  background-position: 0 0, 72px 48px;
+  background-size: 180px 180px, 320px 320px;
+  animation: star-drift 220s linear infinite;
+  will-change: background-position;
+}
+
+body::after {
+  opacity: 0.54;
+  background:
+    linear-gradient(115deg, transparent 0 16%, rgba(255, 250, 240, 0.34) 28%, transparent 42%),
+    linear-gradient(72deg, transparent 0 34%, rgba(93, 123, 91, 0.22) 50%, transparent 66%),
+    linear-gradient(rgba(76, 62, 42, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(76, 62, 42, 0.045) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 46px 46px, 46px 46px;
+}
+
+@keyframes star-drift {
+  to {
+    background-position: 540px 280px, -360px 260px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    animation: none;
+  }
+}
