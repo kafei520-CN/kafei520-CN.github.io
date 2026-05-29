@@ -263,6 +263,41 @@
 
 .article-content pre {
   position: relative;
+  background: #211d19;
+  color: #fff7e8;
+}
+
+.article-content pre code,
+.article-content pre code.hljs,
+.article-content pre .hljs {
+  color: #fff7e8;
+  background: transparent;
+}
+
+.article-content pre .hljs-comment,
+.article-content pre .hljs-quote {
+  color: #a89f94;
+}
+
+.article-content pre .hljs-keyword,
+.article-content pre .hljs-selector-tag,
+.article-content pre .hljs-built_in,
+.article-content pre .hljs-name {
+  color: #ffd38a;
+}
+
+.article-content pre .hljs-string,
+.article-content pre .hljs-title,
+.article-content pre .hljs-section,
+.article-content pre .hljs-attribute {
+  color: #bfe8a9;
+}
+
+.article-content pre .hljs-number,
+.article-content pre .hljs-literal,
+.article-content pre .hljs-variable,
+.article-content pre .hljs-template-variable {
+  color: #9ed7ff;
 }
 
 .article-content pre[data-language]::before {
