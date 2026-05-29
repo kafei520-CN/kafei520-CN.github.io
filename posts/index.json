@@ -5,5 +5,12 @@
     "slug": "first-post",
     "file": "first-post.md",
     "date": "2026-05-29"
+  },
+  {
+    "title": "Quietly项目介绍",
+    "summary": "Quietly的介绍",
+    "slug": "anjing",
+    "file": "anjing.md",
+    "date": "2026-05-29"
   }
 ]
