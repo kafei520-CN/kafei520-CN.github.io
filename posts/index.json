@@ -12,5 +12,12 @@
     "slug": "anjing",
     "file": "anjing.md",
     "date": "2026-05-29"
+  },
+    {
+    "title": "SimuKraft 工业系统自定义说明",
+    "summary": "本文面向整合包开发者，说明如何通过外部 JSON 定义工业建筑的职业、配方、容器、站位点和 NPC 工作流程。",
+    "slug": "industrial_customization",
+    "file": "industrial_customization.md",
+    "date": "2026-06-01"
   }
 ]
