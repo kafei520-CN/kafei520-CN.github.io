@@ -1,5 +1,6 @@
 .article-page {
   width: min(1180px, calc(100% - 36px));
+  min-width: 0;
   margin-inline: auto;
   padding-top: 24px;
 }
@@ -16,6 +17,7 @@
 }
 
 .article-reader {
+  min-width: 0;
   padding: clamp(30px, 5vw, 72px);
   border-radius: 34px;
 }
@@ -25,6 +27,7 @@
   grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+  min-width: 0;
 }
 
 .article-toc {
@@ -34,6 +37,7 @@
   gap: 12px;
   max-height: calc(100vh - 140px);
   overflow: auto;
+  min-width: 0;
   padding: 18px;
   border-radius: 24px;
 }
@@ -50,11 +54,13 @@
 }
 
 .toc-link {
+  min-width: 0;
   padding: 8px 10px;
   border-radius: 12px;
   color: var(--muted);
   font-size: 0.95rem;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .toc-link:hover {
@@ -106,7 +112,12 @@
 }
 
 .article-content {
+  min-width: 0;
   font-size: 1.06rem;
+}
+
+.article-content code {
+  overflow-wrap: anywhere;
 }
 
 .article-content > :first-child {
@@ -187,6 +198,7 @@
 .article-content table {
   display: block;
   width: 100%;
+  max-width: 100%;
   margin: 1.4em 0;
   overflow-x: auto;
   border-collapse: collapse;
@@ -248,6 +260,7 @@
 }
 
 .article-content .math-block {
+  max-width: 100%;
   margin: 1.4em 0;
   overflow-x: auto;
   padding: 16px;
@@ -263,6 +276,8 @@
 
 .article-content pre {
   position: relative;
+  max-width: 100%;
+  overflow-x: auto;
   background: #211d19;
   color: #fff7e8;
 }
@@ -271,6 +286,8 @@
 .article-content pre code.hljs,
 .article-content pre .hljs {
   color: #fff7e8;
+  overflow-wrap: normal;
+  word-break: normal;
   background: transparent;
 }
 
