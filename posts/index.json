@@ -20,4 +20,12 @@
     "file": "industrial_customization.md",
     "date": "2026-06-01"
   }
+  ,
+    {
+    "title": "SimuKraft 商业系统自定义说明",
+    "summary": "本文面向整合包作者，说明如何通过外部 JSON 定义商业建筑的 NPC 交易内容。商业控制盒只负责雇佣、营业状态和管理；玩家右键商业员工 NPC 时打开的购买界面会读取这里的商业 JSON，并按村民交易风格显示。",
+    "slug": "commercial_customization",
+    "file": "commercial_customization.md",
+    "date": "2026-06-05"
+  }
 ]
