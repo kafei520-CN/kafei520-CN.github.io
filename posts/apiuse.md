@@ -1,0 +1,772 @@
+# Sim-U-Kraft 接口用法索引
+
+本文给多人协作使用，目的是说明“应该从哪里调用、调用前要验证什么、哪些层不能互相越界”。这里记录的是当前工程中比较稳定的服务入口，不替代源码注释。
+
+当前工程目标版本：
+
+```text
+Minecraft 1.21.1
+NeoForge 21.1.x
+Java 21
+LDLib2
+SQLite
+```
+
+## 总规则
+
+- 服务端永远是权威端。资金、城市归属、NPC、建筑、材料消耗、方块变更只能由服务端验证后执行。
+- GUI 只显示数据和发起请求，不能直接修改 `Manager`、SQLite 或世界状态。
+- Packet 只做参数接收、玩家/世界/权限/距离校验，然后调用 Service。
+- 长期数据通过 `Manager` / `Service` / `SimuSqliteStorage` 链路写入 SQLite，不要在业务代码里绕过现有入口直接写数据库。
+- NPC 饱食度是实体运行状态，唯一持久化来源为 `CitizenEntity` 的 `Hunger` NBT；不要把 `hunger` 字段重新写回 `CitizenData` 或 `citizens` 表。
+- 异步线程不能访问 `ServerLevel`、实体、方块实体、箱子和世界方块。需要异步计算时，先在主线程采集不可变快照。
+- 任何按 tick 执行的逻辑必须分片、限流或缓存，不能每 tick 全量扫描 NPC、建筑、箱子或区块。
+- 修改配置项时同步更新 `ServerConfig`、语言文件；如果存在配置界面入口，也要同步显示。
+
+## 城市接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.city
+common.cn.kafei.simukraft.city.poi
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `CityService` | `createCity(level, cityName, mayorId, mayorName, cityCorePos)` | 创建城市并登记市长 |
+| `CityService` | `findCity(level, cityId)` | 按城市 UUID 查询 |
+| `CityService` | `findPlayerCity(level, playerId)` | 查询玩家所在城市 |
+| `CityService` | `findCityByCorePos(level, cityCorePos)` | 通过城市核心方块位置查询城市 |
+| `CityService` | `hasPermission(level, cityId, playerId, required)` | 权限判断 |
+| `CityService` | `canManageCity(level, cityId, playerId)` | 判断是否可管理城市 |
+| `CityService` | `addPlayer/removePlayer/setPlayerPermission` | 成员管理 |
+| `CityClaimService` | `buyChunk(level, player, city, chunkX, chunkZ)` | 购买城市区块 |
+| `CityPoiService` | `registerPoi/registerPoiAtCityCore` | 登记城市 POI |
+| `CityPoiService` | `deactivatePoi(level, pos)` | 关闭/移除 POI |
+| `CityPoiService` | `findPois/getCapacity` | 查询 POI 和容量 |
+
+调用建议：
+
+```java
+Optional<CityData> city = CityService.findCityByCorePos(level, corePos);
+if (city.isEmpty()) {
+    return;
+}
+if (!CityService.canManageCity(level, city.get().id(), player.getUUID())) {
+    return;
+}
+```
+
+注意事项：
+
+- 城市核心是管理入口，不是所有城市生态数据的唯一来源。
+- 区块购买必须走 `CityClaimService.buyChunk`，它会处理权限、相邻区块、资金和失败回滚。
+- 新建筑、新工作点、新床位都应通过 POI 或建筑登记服务进入城市生态，不要手写城市人口或容量。
+
+## NPC 接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.citizen
+common.cn.kafei.simukraft.entity
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `CitizenService` | `ensureCitizen(level, entity)` | 确保实体有持久化数据 |
+| `CitizenService` | `syncEntity(level, entity)` | 把持久化数据同步回实体显示 |
+| `CitizenService` | `setCity/setHome/setWorkplace` | 修改城市、住宅、工作点绑定 |
+| `CitizenService` | `applyEmployment/clearEmployment` | 低层职业字段写入/清理，普通雇佣解雇优先走 `CitizenEmploymentService` |
+| `CitizenService` | `findCitizen/listCitizensByCity/listHireableCitizens` | 查询 NPC 数据 |
+| `CitizenService` | `spawnCitizen(...)` | 生成 NPC |
+| `CitizenHousingService` | `fillVacantHomes/spawnCitizensForVacantHomes` | 自动入住或生成入住市民 |
+| `CitizenBedSleepService` | `tryStartSleeping(level, entity, bedHeadPos, wakeupPos)` | 让NPC进入睡床姿势，检查床类型、OCCUPIED标志和mod级占用，失败则返回false |
+| `CitizenBedSleepService` | `wakeUp(level, entity, fallbackPos)` | 唤醒NPC：stopSleeping + 定位到预计算安全落点 |
+| `CitizenBedSleepService` | `release(level, citizenUUID)` | 仅清理mod占用记录（实体未加载时用，不调用stopSleeping） |
+| `CitizenBedSleepService` | `getOccupantUUID(level, bedHeadPos)` | 查询指定床头坐标的mod占用者UUID |
+| `CitizenBedSleepService` | `isOccupiedByOther(levelKey, bedHeadPos, selfUUID)` | 判断床是否被其他NPC占用（同一NPC重入返回false） |
+| `CitizenBedSleepService` | `clearServerCaches(server)` | 存档卸载时清理 OCCUPIED_BEDS / CITIZEN_BED / CITIZEN_WAKEUP_POS |
+| `CitizenHomeRestService` | `tick/isRestTime/resolveHomeTarget` | 夜间回家、统一休息窗口与床边目标点 |
+| `CitizenHomeRestService` | `isResidentialBedHead(state)` | 判断方块是否为红床床头（`public static`，供跨模块复用，不要在各处重复实现） |
+| `CitizenWorkplaceMoveService` | `returnToWorkplace/resolveWorkplaceTarget` | 第二天回到工作岗位 |
+| `CitizenTeleportService` | `teleportCitizen/teleportOrSpawnCitizen` | 寻路兜底传送或实体补偿 |
+| `CitizenDeathService` | `handleDeath(level, entity)` | 死亡登记 |
+| `CitizenLevelService` | `snapshot/addExperience/progress` | 职业等级与经验 |
+| `CitizenLevelService` | `blocksPerTick(citizen, jobType, basePerSecond)` | 按等级换算每 tick 处理方块数（建筑师、规划师共用） |
+| `CitizenJobVisualService` | `define/sync` | 职业手持物和动作表现 |
+| `CitizenFoodConsumptionService` | `canEatStack/clearExpiredVisual` | 统一判断食物、同步吃饭表现和恢复临时手持物 |
+| `CitizenDroppedFoodService` | `tryEatNearbyFood(level, entity, data)` | NPC 从地面吃玩家丢出的食物 |
+| `CitizenSelfFeedingService` | `tick/effectiveStatusLabel/isSelfFeeding` | 饥饿 NPC 自动去商业店买饭和临时状态覆盖 |
+
+注意事项：
+
+- NPC 死亡后保留数据，登记为死亡，不要直接删除 SQLite 记录。
+- 新 NPC 加入住宅时，应优先使用住宅床位附近的安全点。
+- 业务代码不要直接改 `CitizenEntity` 的工作状态、手持物、职业字段，应通过 `CitizenService` 或 `CitizenJobVisualService`；饱食度例外，应只通过 `CitizenEntity#setHunger` 修改实体 NBT。
+- 除饱食度外，长期市民事实以 `CitizenData` 和 SQLite 为准；饱食度以 `CitizenEntity#getHungerValue()` / `Hunger` NBT 为准。
+- 玩家投喂不是右键交互，而是把食物丢到 NPC 附近。工作中的 NPC 不会吃无主掉落物，避免误吃工业/农田/其它流程产物；玩家丢出的食物可以被吃掉。
+- `CitizenFoodConsumptionService` 使用物品 `FoodProperties` 计算增加量，只消耗一份食物并播放吃饭表现，不负责经济或商业库存。
+- 夜间睡床通过 `CitizenBedSleepService.tryStartSleeping` 让NPC进入 `Pose.SLEEPING`；`tryStartSleeping` 同时检查原版 `BlockStateProperties.OCCUPIED`（玩家/村民等占用时为true），无需额外过滤。清晨统一调用 `wakeUp`；实体未加载时调用 `release` 只清理占用记录。`resolveBedHeadPos` 在 `ResidentialBedPoiService` 中已改为 `public static`，可直接复用。
+- 夜间回家只处理拥有有效住宅 POI 的居民；`CitizenHomeRestService.tick` 会写入 `workNeedDetail=home_rest`，白天清理标记并让仍有岗位的 NPC 通过 `CitizenWorkplaceMoveService.returnToWorkplace` 回岗。
+- 建筑师、规划师、农民的夜间暂停统一使用 `CitizenHomeRestService.isRestTime(level)`，不要在各自服务里复制一套时间窗口判断。
+- 按职业等级换算每 tick 处理方块数时，统一调用 `CitizenLevelService.blocksPerTick(citizen, jobType, basePerSecond)`。`basePerSecond` 从 `ServerConfig` 读取（例如 `builderBlocksPerSecond()`、`plannerBlocksPerSecond()`），方法内部统一处理等级进度和上限（max 128）。新增需要按等级缩放速度的职业时应复用此方法，不要再写独立的线性插值公式。
+- 判断方块是否为红床床头时统一调用 `CitizenHomeRestService.isResidentialBedHead(state)`，不要在建筑、规划、床位等模块各自重复实现。
+
+## 家庭接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.citizen.family
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `FamilyManager` | `get(level)` | 获取单例 |
+| `FamilyManager` | `createFamily(level, cityId, husbandId, wifeId)` | 结婚时创建 ACTIVE 家庭，自动计算世代 |
+| `FamilyManager` | `createSingle(level, cityId, adultId, gender)` | 成年时创建 FORMING 家庭 |
+| `FamilyManager` | `addChild(level, familyId, childId)` | 添加子女到家庭 |
+| `FamilyManager` | `handleMemberDeath(level, familyId, citizenId)` | 成员死亡时更新家庭状态 |
+| `FamilyManager` | `leaveFamily(level, familyId, childId)` | 子女成年离家 |
+| `FamilyManager` | `getAncestorTree(familyId, maxDepth)` | 回溯族谱，最多10代 |
+| `NpcGrowthService` | `tickGrowth(level, random, currentDay)` | 每日老化（+1岁），18岁成年，到寿限自然死亡 |
+| `NpcChildbirthService` | `tickChildbirths(level, random, currentDay)` | 孕期满后分娩，优先使用预约床位 |
+| `NpcPregnancyService` | `tickPregnancies(level, random, currentDay)` | 按概率掷骰，成功后立即预约婴儿床位 |
+| `NpcMarriageService` | `tickMarriages(level, random, currentDay)` | 同城异性未婚 NPC 随机配对 |
+| `FamilyRelocationService` | `tryRelocate(level, family)` | 结婚或分娩后触发搬家评分 |
+
+注意事项：
+
+- 所有家庭日常事件统一由 `CitizenManager.tickFamilySystemsIfNewDay` 按游戏日顺序触发：`NpcGrowthService → NpcChildbirthService → NpcPregnancyService → NpcMarriageService`，不要在其他服务中重复实现婚育规则。
+- 怀孕成功后立即通过 `CitizenData.reservedBabyBedPoiId` 预约婴儿床，分娩时优先使用预约床；孕妇死亡时 `markDead()` 自动释放预约，防止多胎并发抢占同一张床。
+- 家庭状态 `FORMING / ACTIVE / DISSOLVED` 依据双方存活状态自动维护，不要在外部直接修改 `FamilyStatus`。
+- `getAncestorTree` 在世代超过10层时 `paternalFamilyId / maternalFamilyId` 置为 null，只保留当代记录，防止无限深递归。
+
+## 职业与雇佣接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.job
+common.cn.kafei.simukraft.network.npc
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `CitizenEmploymentService` | `workplaceId(sourceType, role, pos)` | 为建筑盒、农田盒等非 POI 岗位生成稳定岗位 UUID |
+| `CitizenEmploymentService` | `hireForSource/assignForSource` | 从方块来源雇佣或恢复岗位绑定 |
+| `CitizenEmploymentService` | `hire/assign` | 直接指定职业、岗位和状态 |
+| `CitizenEmploymentService` | `fire/fireAssigned/clearAfterJobFinished` | 解雇、按岗位解雇或任务完成后清理职业 |
+| `CitizenEmploymentService` | `findAssigned/repairLoadedEmployment` | 查询岗位 NPC，并修复旧存档中职业与岗位不一致的数据 |
+| `CityJobAssignmentService` | `assignFirstAvailable(level, citizenId, jobType)` | 给 NPC 分配第一个可用岗位 |
+| `CityJobAssignmentService` | `clearAssignment(level, citizenId)` | 解雇/清除岗位 |
+| `CityJobAssignmentService` | `getAssignments/getAssignedCount` | 查询岗位占用 |
+| `CityJobCapacityService` | `getJobCapacities(level, cityId)` | 查询城市岗位容量 |
+| `CityJobType` | `fromName/fromPoiType/primaryPoiType` | 字符串、POI 与职业互转 |
+| `CityJobMobilityService` | `resetCitizenAfterFire/syncCitizenEntityState` | 雇佣状态视觉同步 |
+
+注意事项：
+
+- NPC 不自动抢岗位，玩家操作或明确的系统规则才能分配职业。
+- 岗位容量来自 POI 和建筑记录，不要在 UI 里手算。
+- 后续移动到工作点时优先使用 `CitizenNavigationService.requestMove`，超过配置距离再走传送兜底。
+- 建筑盒建筑师、建筑盒规划师、农田盒农民这类非 POI 岗位必须通过 `CitizenEmploymentService` 绑定 `sourceType/role/BlockPos`，这样重进世界才能按稳定岗位 UUID 恢复。
+- 解雇不要直接调用 `CitizenService.clearEmployment`，优先走 `CitizenEmploymentService.fire` 或 `fireAssigned`；它会先中断建筑/规划任务或关闭农田运行，再清空 SQLite 中的职业、岗位和状态字段。
+
+## 建筑接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.building
+common.cn.kafei.simukraft.building.controlbox
+client.cn.kafei.simukraft.client.buildbox
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `BuildingCatalog` | `listBuildings/findBuilding` | 查询建筑资源 |
+| `BuildingStructureService` | `loadStructure/resolvePlacedBlocks` | 加载结构并解析旋转后的方块 |
+| `BuilderConstructionService` | `startTask/tick/cancelTask` | 建造任务生命周期 |
+| `BuilderConstructionService` | `hasActiveBuildTask/findBuildBoxPos` | 查询建造任务状态 |
+| `BuilderConstructionService` | `interruptTask/interruptTasksByBuildBox` | 中断建造 |
+| `BuilderConstructionService` | `resolveResidentialBedPois` | 解析住宅床位 POI |
+| `BuildingTaskData` | `withStatus(status)` | 基于当前任务数据返回新状态的快照（不可变更新，不要用全量构造器） |
+| `BuildingTaskData` | `withProgress(index, status)` | 推进方块游标并更新状态（同上，替代 18 参数构造器） |
+| `PlacedBuildingService` | `register/unregister/getBuildings` | 已放置建筑记录 |
+| `PlacedBuildingService` | `findByPoi/findByPoiPos/findByContainedPos` | 由 POI 或空间位置查建筑 |
+| `PlacedBuildingService` | `intersects/isOccupiedByOtherBuilding` | 建筑占用判断 |
+| `PlacedBuildingDemolitionService` | `demolish(level, building)` | 拆除建筑 |
+| `ResidentialBedPoiService` | `addRecordedBeds/removeRecordedBeds` | 住宅床位登记/清理 |
+| `ResidentialControlBoxService` | `buildView/findBuilding` | 住宅控制盒界面数据 |
+| `PlannerWorkService` | `startTask/tick/cancelTask` | 规划任务(清除/填充/替换)生命周期 |
+| `PlannerWorkService` | `hasActiveTask/interruptTasksByBuildBox` | 查询/中断规划任务 |
+| `PlannerWorkService` | `flush/clearServerCaches` | 关服暂停与缓存清理 |
+
+注意事项：
+
+- 建筑开始施工必须由服务端验证：玩家、城市、权限、建筑文件、建筑盒位置、空间占用、岗位/建筑师状态。
+- 建筑完成后要登记 `PlacedBuildingRecord`、床位 POI、控制盒边界，并发送完成消息/音效。
+- 建筑拆除必须清理建筑记录、POI、床位和客户端边界渲染状态。
+- 客户端预览只负责显示，最终位置和施工仍以服务端校验为准。
+- `BuildingTaskData` 是不可变 record。需要更新状态时统一使用 `task.withStatus(status)` 或 `task.withProgress(index, status)`，不要手写 18 参数构造器。`PlanningTaskData` 同理，已有 `withStatus/withProgress` 方法。
+- 建造速度（每 tick 方块数）统一通过 `CitizenLevelService.blocksPerTick(citizen, jobType, basePerSecond)` 计算，基础速度从 `ServerConfig` 读取，不要在各职业服务里重复实现等级换算公式。
+- 红床床头判断统一调用 `CitizenHomeRestService.isResidentialBedHead(state)`，不要在建筑、床位、规划等模块里各写一份。
+- 规划入口走 `PlannerOperationScreenOpener`：先在 LDLib2 界面选择清除、填充或替换，再进入两点选区。清除会进入确认页，填充/替换会先请求材料扫描。
+- 规划任务由 `CreatePlanningTaskPacket` 创建：服务端校验规划师在岗、方块 id 有效、体积上限、城市资金、选中容器是否紧贴建筑盒，并按体积一次性预扣资金(`ServerConfig.plannerMoneyPerBlock(operation)`，可在配置 GUI 调整)。填充/替换的真实方块来自玩家选择的相邻容器，清除掉落物入该容器；基岩、建筑盒、容器受保护。
+- 填充/替换材料选择走 `PlannerMaterialScanRequestPacket` / `PlannerMaterialScanResponsePacket`，服务端只扫描建筑盒六面紧贴的容器；替换任务支持多组 `源方块 -> 目标方块` 映射。
+
+## 农田接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.farmland
+common.cn.kafei.simukraft.network.farmland
+client.cn.kafei.simukraft.client.farmland
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `FarmlandBoxService` | `hireWorkplaceId/cityIdFor` | 解析农田盒岗位 UUID 和所属城市 |
+| `FarmlandBoxService` | `findAssignedFarmer/findAssignedWorker` | 查询绑定到农田盒的农民 |
+| `FarmlandBoxService` | `buildView` | 构造农田盒界面视图数据 |
+| `FarmlandBoxService` | `setCrop/setArea` | 设置作物和作业区域 |
+| `FarmlandBoxService` | `toggleRunning/toggleRunningOff/onRemoved` | 启停农田作业和破坏清理 |
+| `FarmlandBoxService` | `resolveAdjacentChest` | 查找紧贴农田盒六面的材料/产物容器 |
+| `FarmlandFarmingService` | `tick/clearServerCaches` | 农民真实耕种、播种、收割和运行时缓存清理 |
+| `FarmCrop` | `fromId/fromSeedItem/next` | 作物 ID、种子物品与作物枚举互转 |
+| `FarmlandBoxOpenRequestPacket` | `openFor` | 服务端校验后打开农田盒界面 |
+| `FarmlandBoxActionPacket` | `TOGGLE_RUN/FIRE/DEMOLISH` | 农田盒启停、解雇和拆除动作入口 |
+| `FarmlandBoxSetAreaPacket` | `handle` | 两点选区确认后提交区域 |
+
+注意事项：
+
+- 农田区域由客户端两点选择后发送 `FarmlandBoxSetAreaPacket`，最终仍由 `FarmlandBoxService.setArea` 归一到农田盒 Y 层，并校验最大尺寸、重叠和运行状态。
+- 农民雇佣绑定使用 `FarmlandBoxService.HIRE_SOURCE_TYPE` / `HIRE_ROLE` 加农田盒坐标生成稳定岗位 UUID，不要手写职业或岗位字段。
+- 开始作业和每轮作业都只使用紧贴农田盒六面的容器；没有相邻容器时不能继续种植或收纳。
+- 农田工作顺序为挖水槽、耕地、播种、收割；水槽按作业区 Z 方向每三行农田后一行水槽分隔，耕地和播种按水槽分出的组从左到右完成一组再进入下一组。
+- `FarmlandFarmingService` 夜间通过 `CitizenHomeRestService.isRestTime` 暂停，不覆盖回家标记；农民白天由统一回岗逻辑回到农田盒附近后继续工作。
+- NPC 使用工具前必须移动到 `FarmlandWorkGeometry` 解析出的可站立点，避免隔空操作和踩坏耕地。
+
+## 材料接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.material
+common.cn.kafei.simukraft.building.BuilderMaterialService
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `WorkMaterialPolicy` | `requiresMaterial(state)` | 判断方块是否需要材料 |
+| `WorkMaterialPolicy` | `requestForBlock(state)` | 把方块转换为材料请求 |
+| `WorkMaterialRequest` | `exact/exactStack/matching` | 构造材料请求 |
+| `NpcWorkMaterialService` | `tryConsume(level, materialCache, request)` | 从工作方块旁材料箱消耗材料 |
+| `NpcWorkMaterialService` | `markMissing(level, citizen, context, result)` | 记录材料缺失 |
+| `WorkMaterialNotificationService` | `notifyMissing(...)` | 缺材料弹窗提示 |
+| `BuilderMaterialService` | `tryConsumeForBlock(level, materialCache, targetState)` | 建造师放方块前消耗材料 |
+| `GenericContainerAccess` | `isContainer/snapshotSlots/consumeSingleItemAtSlot` | 通用容器低层读写 |
+
+调用建议：
+
+```java
+WorkMaterialResult result = BuilderMaterialService.tryConsumeForBlock(level, materialCache, targetState);
+if (!result.available()) {
+    NpcWorkMaterialService.markMissing(level, citizen, taskName, result);
+    return;
+}
+```
+
+注意事项：
+
+- 上层业务优先用 `NpcWorkMaterialService` / `BuilderMaterialService`，不要直接扫箱子。
+- `GenericContainerAccess` 是低层接口，只在材料缓存或特殊容器适配时使用。
+- 材料箱只扫描紧贴工作方块的位置，并依靠缓存和冷却，不能每 tick 全量扫描。
+- 缺材料消息应使用弹窗，不再占用聊天栏。
+
+## 寻路接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.path
+client.cn.kafei.simukraft.client.path
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `CitizenNavigationService` | `requestMove(level, citizenId, target, intent)` | 让 NPC 前往目标点 |
+| `CitizenNavigationService` | `requestTestMove(...)` | 测试指令专用寻路 |
+| `CitizenNavigationService` | `stop(level, citizenId)` | 停止 NPC 当前导航，并重置实体导航和移动控制目标 |
+| `CitizenNavigationService` | `isNavigating(level, citizenId)` | 查询是否正在导航 |
+| `CitizenNavigationService` | `tick(level)` | 服务端集中推进寻路 |
+| `CitizenNavigationService` | `invalidate(level, changedPos)` | 方块变化后标记路径缓存失效 |
+| `CitizenNavigationService` | `debugPathTo/sendStatus/syncDebugPaths` | 调试路径渲染 |
+| `CitizenWanderService` | `tick/requestCityWander/randomTarget` | 城市闲逛和压力测试 |
+| `NpcPathDebugRenderer` | `handleToggleShortcut/onRender` | 客户端 Alt+P 调试渲染 |
+
+调用建议：
+
+```java
+boolean accepted = CitizenNavigationService.requestMove(level, citizenId, target, MovementIntent.WORK);
+if (!accepted) {
+    CitizenTeleportService.teleportCitizen(level, citizenId, target);
+}
+```
+
+注意事项：
+
+- 工作、回家、上班、测试移动等入口应优先调用 `CitizenNavigationService.requestMove`。
+- NPC 从移动阶段切换到原地工作动作时应调用 `CitizenNavigationService.stop`，例如伐木进入挖树桩阶段，避免旧 waypoint 或避让目标继续拉动实体。
+- 超过 `ServerConfig.pathFarMovementTeleportDistance()` 的距离应走传送兜底，不做大范围真实寻路。
+- 原地卡住、路径失败、目标区块不可用时允许传送兜底，避免 NPC 永久堵塞。
+- 异步寻路只处理 `PathSnapshot`，不能持有 `ServerLevel`、`Entity`、`BlockEntity`。
+- 路径执行优先使用原版 `PathNavigation` 到局部 waypoint，不要重写完整移动物理。
+
+## 经济接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.economy
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `EconomyService` | `getCityBalance(level, cityId)` | 查询城市余额 |
+| `EconomyService` | `canAfford(level, cityId, amount)` | 判断是否足够支付 |
+| `EconomyService` | `depositCityFunds(level, cityId, actor, amount, reason)` | 入账并记录流水 |
+| `EconomyService` | `normalizeAmount(amount)` | 金额标准化 |
+| `FinanceLedgerService` | `record/recent` | 财政流水 |
+| `ResidentialRentService` | `tick/clearServerCaches` | 住宅租金结算 |
+
+注意事项：
+
+- 城市资金变更优先使用 `EconomyService`。如果必须直接调用 `CityService.depositFunds/withdrawFunds`，要确认是否需要补写流水。
+- 金额必须标准化并校验非负、有限值，避免 NaN 或极端数字污染存档。
+
+## 商业接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.commercial
+common.cn.kafei.simukraft.network.commercial
+client.cn.kafei.simukraft.client.commercial
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `CommercialDefinitionLoader` | `loadForBuilding(building)` | 按建筑记录加载商业 JSON 定义 |
+| `CommercialControlBoxService` | `buildView/resolveBuilding/findAssignedWorker` | 商业控制盒界面数据、建筑解析和员工查询 |
+| `CommercialTradeService` | `executePlayerTrade/executeNpcOffer` | 执行玩家或 NPC 可见报价 |
+| `CommercialTradeSupplyService` | `validate/apply/canSupply` | 校验并应用库存、原材料和输出空间 |
+| `CommercialStockService` | `restock/syncDefinitionStock` | 库存初始化、补货和定义同步 |
+| `CommercialFoodMarketService` | `findPurchasePlan/executePurchase` | 饥饿 NPC 自动查找并消耗商业食物报价 |
+
+注意事项：
+
+- 玩家交易只能使用 `visibleTo=player/mixed` 的报价，NPC 自动经营和自动买饭只能使用 `visibleTo=npc/mixed` 的报价。
+- `CommercialFoodMarketService` 只选择“成本是资金、结果含可食用物品、且没有资金结果”的报价；成交时消耗库存/原材料，并按报价资金的 40% 作为 `commercial_npc_food_tax` 写入城市流水。
+- NPC 自动买饭不会重新写 `CitizenData` 饱食度，买到食物后由 `CitizenSelfFeedingService` 修改实体 `Hunger` NBT 并同步吃饭表现。
+- 商业交易价格和库存都以服务端定义为准，客户端只展示服务端响应并发起确认请求。
+
+## 工业接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.industrial
+common.cn.kafei.simukraft.network.industrial
+client.cn.kafei.simukraft.client.industrial
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `IndustrialDefinitionLoader` | `loadForBuilding(building)` | 按已放置工业建筑加载 JSON 定义 |
+| `IndustrialControlBoxService` | `buildView/resolveBuilding/findAssignedWorker` | 构建控制箱视图、解析建筑与员工 |
+| `IndustrialWorkService` | `tick/flush/clearServerCaches` | 推进工业控制箱工作流、保存和清理运行时 |
+| `IndustrialWorkAreaService` | `workAreaBounds(...)` | 解析辐射型作业区边界 |
+| `IndustrialBlockClusterHarvestService` | `execute(...)` | 执行通用区域方块簇采集，例如伐木 |
+| `IndustrialCarriedItemService` | `addItems/depositToContainers/dropAndClear` | 管理 `workState` 临时携带物 |
+| `IndustrialEntityActionService` | `requireDrops/collectReachableDrops/shear/slaughter` | 执行动物、剪毛、屠宰和地面掉落收集动作 |
+| `IndustrialControlBoxViewSyncService` | `syncStatusIfChanged/clearServerCaches` | 节流推送工业控制箱状态视图 |
+
+注意事项：
+
+- 工业 JSON 是工作流权威来源，代码只实现通用步骤，不把建筑专用逻辑写死在服务里。
+- `workArea` 只定义外部搜索范围，采集动作仍要通过 `harvest_block_clusters` 等步骤显式编排。
+- 方块簇采集的长期可恢复状态写入 `machineState`，临时携带物写入 `workState`；两者语义不同，不要混用。
+- `collect_drops` 收集世界掉落实体时只写入 `workState`，后续必须用 `deposit_carried_items` 入库；确认写入成功前不得删除掉落实体。
+- `workState` 中的物品必须通过入库或掉落清理，不允许直接清空，避免吞物品。
+- 采集阶段应在靠近目标后停止导航，只保留朝向、挥手和裂纹进度；真正移除方块必须由服务端完成并复查。
+- 工业控制箱状态可通过 `IndustrialControlBoxViewSyncService` 推送给附近玩家，但仍以服务端 `IndustrialBoxData` 为准。
+
+## 医疗接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.medical
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `MedicalService` | `tick(level)` | 每20tick 推进患者移动与治疗 |
+| `MedicalService` | `tickDaily(level, random, currentDay)` | 每游戏日生成随机疾病（医生职业0.9%/日，其他职业走 ServerConfig） |
+| `MedicalService` | `isAdmitted(citizen)` | 判断市民是否已入院（`medical().medicalBedPoiId() != null`） |
+| `MedicalService` | `isHospitalized(level, citizenUUID)` | 供 `CitizenEntity.tick` 使用，判断实体是否处于住院状态 |
+| `MedicalService` | `isOnMedicalLeave(citizen, currentDay)` | 怀孕、产假或入院时返回 true，工作调度据此跳过该市民 |
+| `MedicalService` | `hasMedicalCoverageForCitizen(level, citizen)` | 医院运营中且覆盖到市民住宅区块时返回 true |
+| `MedicalService` | `releasePatientsForControlBox(level, boxPos)` | 医疗控制箱拆除时批量释放患者 |
+| `MedicalService` | `snapshotForBuilding(level, building, boxPos)` | 构造医疗控制箱界面数据快照 |
+| `MedicalControlBoxService` | `buildView/resolveBuilding/findAssignedWorker` | 控制箱界面数据、建筑解析和医生查询 |
+| `MedicalDefinitionLoader` | `loadForBuilding(building)` | 按已放置建筑加载医疗 JSON 定义 |
+
+注意事项：
+
+- 入院状态以 `CitizenData.medical().medicalBedPoiId()` 为准，不要在外部直接修改该字段。
+- 医疗覆盖是区块粒度判断，`hasMedicalCoverageForCitizen` 检查医院运营状态和区块范围，雇佣前置条件和生育前置条件都应先调用该方法。
+- 食物中毒不在每日随机池内，由 `CitizenFoodConsumptionService` 在食用蜘蛛眼、腐肉、河豚时触发，不要在 `tickDaily` 里重复实现。
+- 医疗控制箱拆除时必须调用 `releasePatientsForControlBox`，否则市民的 `medicalBedPoiId` 会残留并阻止其正常工作。
+- 产后恢复状态通过 `CitizenData.medical().setPostpartumUntilDay` 写入，`isOnMedicalLeave` 会一并检查。
+
+## 弹窗与提示接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.network.toast
+client.cn.kafei.simukraft.client.toast
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `InfoToastService` | `send(player, message)` | 普通信息 |
+| `InfoToastService` | `success/warning/error` | 成功、警告、错误样式 |
+| `InfoToastService` | `money(player, message)` | 金钱提示 |
+| `InfoToastService` | `material(player, message, iconStack)` | 材料提示，支持物品图标 |
+| `ClientInfoToast` | `show(...)` | 客户端显示队列 |
+
+注意事项：
+
+- 服务端业务不要直接打开客户端 UI，发送 `InfoToastPacket` 即可。
+- 完全相同的消息会在客户端合并显示，适合缺材料、租金、完成建筑等高频提示。
+- 长消息应允许弹窗根据文本行数调整高度。
+
+## 网络包接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.network
+```
+
+新增 packet 的基本格式：
+
+```java
+public record ExamplePacket(BlockPos pos) implements CustomPacketPayload {
+    public static final Type<ExamplePacket> TYPE = new Type<>(
+            ResourceLocation.fromNamespaceAndPath(SimuKraft.MOD_ID, "example"));
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, ExamplePacket> STREAM_CODEC =
+            StreamCodec.of(ExamplePacket::encode, ExamplePacket::decode);
+
+    public static void encode(RegistryFriendlyByteBuf buffer, ExamplePacket packet) {
+        BlockPos.STREAM_CODEC.encode(buffer, packet.pos);
+    }
+
+    public static ExamplePacket decode(RegistryFriendlyByteBuf buffer) {
+        return new ExamplePacket(BlockPos.STREAM_CODEC.decode(buffer));
+    }
+
+    public static void handle(ExamplePacket packet, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) {
+                return;
+            }
+            ServerLevel level = player.serverLevel();
+            // 验证距离、方块、城市、权限，再调用 Service。
+        });
+    }
+}
+```
+
+注册位置：
+
+```text
+common.cn.kafei.simukraft.network.ModNetwork
+```
+
+发送方式：
+
+```java
+PacketDistributor.sendToServer(new ExamplePacket(pos));
+PacketDistributor.sendToPlayer(player, new ExampleResponsePacket(...));
+```
+
+服务端 packet 必查：
+
+- `context.player()` 是否为 `ServerPlayer`。
+- 当前维度和目标方块是否仍然有效。
+- 玩家距离是否合理。
+- 玩家是否拥有城市权限。
+- 目标城市、建筑、NPC、任务是否仍存在。
+- 操作是否会重复执行或刷物品。
+
+## 客户端 UI 接口
+
+主要包：
+
+```text
+client.cn.kafei.simukraft.client.ui
+client.cn.kafei.simukraft.client.city
+client.cn.kafei.simukraft.client.citizen
+client.cn.kafei.simukraft.client.buildbox
+client.cn.kafei.simukraft.client.controlbox
+client.cn.kafei.simukraft.client.hire
+client.cn.kafei.simukraft.client.selection
+client.cn.kafei.simukraft.client.freecamera
+client.cn.kafei.simukraft.client.input
+client.cn.kafei.simukraft.client.compat
+client.cn.kafei.simukraft.client.compat.xaero
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `SimuKraftUiTheme` | `createUi(root)` | 创建 LDLib2 UI |
+| `SimuKraftWindowFrame` | `create(screenSize, title, content, closeAction)` | 普通窗口框架，不继承 LDLib Editor |
+| `SimuKraftFlexLayout` | `screenSize/root/pageColumn/row/text` | 通用布局工具 |
+| `SimuKraftClientUiPreferences` | `getFloat/setFloat` | 客户端界面偏好持久化 |
+| `CityCoreScreenOpener` | `open/openMembers/openMap` | 城市核心界面 |
+| `CitizenScreenOpener` | `open` | NPC 信息界面 |
+| `BuildBoxScreenOpener` | `open` | 建筑盒界面 |
+| `BuildingListScreenOpener` | `open` | 建筑列表 |
+| `PlannerOperationScreenOpener` | `open/afterAreaSelected` | 规划师操作选择、两点选区后的后续流程 |
+| `PlannerMaterialSelectionScreenOpener` | `open` | 规划师填充/替换材料与映射选择界面 |
+| `TwoPointSelectionScreen` | `openPlanning/openFarmland` | 规划师和农田盒共用的两点选区自由视角界面 |
+| `TwoPointSelectionManager` | `start/setPoint1/setPoint2/selectedAabb/clear` | 两点选区状态管理 |
+| `TwoPointSelectionRenderer` | `onRender` | 点位和选区线框渲染 |
+| `SimuKraftKeyMappings` | `register/matches/display` | 统一注册并显示选择/预览按键 |
+| `FreeCameraManager` | `activate/deactivate/onRenderFrame` | 自由视角生命周期和移动 |
+| `ResidentialControlBoxScreenOpener` | `request/open/refreshIfOpen` | 住宅控制盒 |
+| `FarmlandBoxScreenOpener` | `request/open` | 农田盒界面 |
+| `FarmlandCropScreen` | `open` | 农田作物选择界面 |
+| `FarmlandHoverPreview` | `onRenderFrame/receiveBounds/clear` | 农田盒悬停区域预览 |
+| `NpcHireScreen` | `request/open` | 雇佣界面 |
+| `LdlibTextFieldImeCompat` | `createProxy/onFocusGained/onFocusLost/onCursorChanged` | LDLib 文本框与 IMBlocker 中文输入软兼容 |
+| `XaeroWorldMapIntegration` | `registerHighlighter` | 向 Xaero World Map 注册城市区块高亮器 |
+| `SimuKraftCityHighlighter` | `regionHasHighlights/chunkIsHighlit/getChunkHighlightSubtleTooltip` | 在 Xaero 地图显示城市认领区块和城市名 |
+
+注意事项：
+
+- 城市核心和 NPC 信息界面使用 `SimuKraftWindowFrame`，不要继承 LDLib2 `Editor`，避免触发 LDLib 编辑器外观设置并强制 UI Scale 自动。
+- UI 层只发 packet，不直接调用服务端 Service。
+- 打开界面前由服务端响应包提供完整视图数据，客户端只渲染。
+- 大列表界面要做分页、缓存或局部刷新，避免每次点击全量请求。
+- 自由视角界面统一实现 `FreeCameraScreen`，鼠标锁定、移动和退出恢复由 `FreeCameraManager` / `CameraMouseLock` 处理。
+- 两点选区只负责客户端点位与线框，确认后必须走对应 packet 到服务端重新校验区域、权限、距离和方块状态。
+- 需要跨界面重开保留的客户端布局值写入 `SimuKraftClientUiPreferences`，例如规划材料界面的 LDLib2 `SplitView` 比例。
+- LDLib 文本框中文输入兼容只在客户端 Mixin 中安装，使用反射访问 IMBlocker；不要在 common 或服务端代码中直接引用 IMBlocker 类。
+- Xaero 集成是可选客户端兼容，依赖 `@Pseudo` Mixin 和 `compileOnly` API；城市区块数据来自 `ClientCityChunkCache`，服务端仍只负责同步城市区块事实。
+
+## 客户端地图兼容
+
+主要包：
+
+```text
+client.cn.kafei.simukraft.client.compat.xaero
+client.cn.kafei.simukraft.mixin.xaero
+client.cn.kafei.simukraft.client.city
+```
+
+调用链：
+
+```text
+CityCore / 城市区块同步包
+  -> ClientCityChunkCache.updateCurrentCity(...)
+  -> MixinWorldMapSession 在 Xaero World Map 会话 init 后拿到 HighlighterRegistry
+  -> XaeroWorldMapIntegration.registerHighlighter(...)
+  -> SimuKraftCityHighlighter 从 ClientCityChunkCache 读取当前维度城市区块并渲染
+```
+
+注意事项：
+
+- `SimuKraftCityHighlighter` 只渲染当前客户端维度，避免跨维度缓存误显示。
+- 区块颜色按城市 UUID 稳定分配；相邻同城区块之间使用填充色，外侧或相邻其它城市时使用边框色。
+- 悬停提示使用 `gui.simukraft.xaero.city.current` / `gui.simukraft.xaero.city.other`，语言文件新增 key 时要保持中英文同步。
+- Xaero 的 `HighlighterRegistry` 在初始化后可能变成不可变列表，当前 Mixin 会复制列表、注册高亮器后再回写不可变副本；如果 Xaero 更新字段名或初始化流程，需要优先复核这个兼容点。
+
+## 配置接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.config
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `ServerConfig` | `cityChunkPrice()` | 区块价格 |
+| `ServerConfig` | `builderBlocksPerSecond()` | 基础建造速度 |
+| `ServerConfig` | `npcMaxLevel()` | NPC 最大等级 |
+| `ServerConfig` | `materialsCreativeMode/materialsExpertMode` | 材料系统模式 |
+| `ServerConfig` | `basicMaterials/materialCategoryGroups/expertModeSkipList` | 材料配置 |
+| `ServerConfig` | `plannerBlocksPerSecond/plannerMaxVolume/plannerMoneyPerBlock` | 规划师速度、体积上限和计费 |
+| `ServerConfig` | `plannerPauseAtNight/builderPauseAtNight/builderRestStartTime/builderRestEndTime` | 职业夜间暂停与统一休息窗口 |
+| `ServerConfig` | `pathMaxActiveCitizens/pathMaxNewRequestsPerTick` | 寻路限流 |
+| `ServerConfig` | `pathLocalRadiusBlocks/pathFarMovementTeleportDistance` | 寻路半径与传送阈值 |
+| `ServerConfig` | `pathDebugEnabled()` | 寻路调试 |
+
+注意事项：
+
+- 读取配置统一走 `ServerConfig` 的静态访问方法，不要在业务代码中保存可长期失效的配置副本。
+- 服务器运行中修改配置后，NeoForge 可能重写文件；测试配置时应先停服或确认配置已重新加载。
+- 默认配置要和语言文件、配置界面说明保持一致。
+
+## 存储接口
+
+主要包：
+
+```text
+common.cn.kafei.simukraft.storage
+```
+
+常用入口：
+
+| 类 | 方法 | 用途 |
+|---|---|---|
+| `SimuSqliteStorage` | `open(server)` | 打开主 SQLite 存储 |
+| `SimuSqliteStorage` | `loadCities/saveCity/deleteCity` | 城市数据 |
+| `SimuSqliteStorage` | `loadCityChunks/saveCityChunk/deleteCityChunks` | 城市区块 |
+| `SimuSqliteStorage` | `loadCityPois/saveCityPoi/deleteCityPois` | POI |
+| `SimuSqliteStorage` | `loadCitizens/saveCitizen/deleteCitizen` | NPC |
+| `SimuSqliteStorage` | `clearCitizenEmployment` | 直接清理 SQLite 中的 NPC 职业/岗位字段，供 `CitizenService.clearEmployment` 兜底 |
+| `SimuSqliteStorage` | `loadBuildingTasks/saveBuildingTask/deleteBuildingTask` | 建造任务 |
+| `SimuSqliteStorage` | `loadPlanningTasks/savePlanningTask/deletePlanningTask` | 规划任务 |
+| `SimuSqliteStorage` | `loadFarmlandBoxes/saveFarmlandBox/deleteFarmlandBox` | 农田盒配置 |
+| `BuildingStructureSqliteDatabase` | `open(server)` | 建筑结构缓存数据库 |
+
+注意事项：
+
+- 普通业务代码优先调用 Service/Manager，不要直接操作 Storage。
+- 新长期数据需要补 schema、repository、manager/service 缓存失效策略。
+- 高频缓存不要写 SQLite，比如路径缓存、临时材料扫描结果、客户端地图帧数据。
+- `citizens` 表不保存饱食度，旧存档里的 `hunger` 列会由 `SimuSqliteSchema.dropColumnIfPresent` 删除；需要展示饱食度时从已加载 `CitizenEntity` 同步，实体未加载时只能使用默认兜底值。
+
+## Tick 与事件接入
+
+常见 tick 服务：
+
+```text
+CitizenManager.get(level).tick(level)        // 含 tickFamilySystemsIfNewDay（成长/分娩/怀孕/婚配）
+MedicalService.tick(level)
+CitizenNavigationService.tick(level)
+CitizenWanderService.tick(level)
+PlacedBuildingService.ensureCityPoisRegistered(level)
+CitizenHomeRestService.tick(level)
+CitizenSelfFeedingService.tick(level)
+BuilderConstructionService.tick(level)
+PlannerWorkService.tick(level)
+PopulationGrowthService.tick(level)
+ResidentialRentService.tick(level)
+FarmlandFarmingService.tick(level)
+HudSyncService.tick(level)
+```
+
+接入规则：
+
+- 优先接入已有服务端 tick 分发位置，不要在多个事件里重复调用同一个服务。
+- 每个 tick 服务内部自行限流，并提供 `clearServerCaches(server)`。
+- 方块放置/破坏事件需要通知相关缓存失效，例如路径快照、住宅床位、建筑边界和材料箱缓存。
+- `SimuKraft.onServerTick` 中夜间回家服务应先于建筑、规划和农田工作服务执行，让职业服务能读取统一休息状态并停止当晚操作。
+- 玩家地面投喂由 `CitizenEntity` 自身 tick 调用 `CitizenDroppedFoodService.tryEatNearbyFood`，不是全局扫描服务；这样只处理已加载 NPC，避免每 tick 全量扫实体。
+
+## 指令接口
+
+主要入口：
+
+```text
+common.cn.kafei.simukraft.command.SimuKraftCommand
+```
+
+用途：
+
+- 调试城市、NPC、寻路、压力测试等功能。
+- 新增测试指令时必须限制权限等级，避免普通玩家刷 NPC、刷任务或绕过城市规则。
+- 压力测试指令要明确限流，不能一次性提交无限数量的寻路或生成请求。
+
+## 新功能推荐调用链
+
+新增“玩家点击 GUI 执行服务端操作”时，推荐链路如下：
+
+```text
+Client Screen
+  -> PacketDistributor.sendToServer(...)
+  -> Server Packet handle
+  -> 校验玩家、距离、方块、城市、权限、任务状态
+  -> Service 执行业务
+  -> Manager/SQLite 保存
+  -> Response Packet / InfoToastPacket 同步客户端
+```
+
+新增“NPC 执行工作”时，推荐链路如下：
+
+```text
+Tick Service
+  -> 查询 CitizenData / Job / Task
+  -> CitizenNavigationService.requestMove(...)
+  -> 到达后执行业务
+  -> 材料系统尝试消耗
+  -> 修改世界或任务状态
+  -> SQLite 增量保存
+  -> Toast/HUD/界面按需同步
+```
+
+新增“方块岗位雇佣/解雇”时，推荐链路如下：
+
+```text
+Client Screen
+  -> NpcHireListRequestPacket / NpcHireAssignPacket 或对应方块 ActionPacket
+  -> 服务端校验距离、方块、城市权限和 NPC 可用性
+  -> CitizenEmploymentService.hireForSource/fire/fireAssigned
+  -> 任务服务中断或岗位运行状态清理
+  -> CitizenService + SimuSqliteStorage 保存职业、岗位和状态
+  -> Response Packet / InfoToastPacket 同步客户端
+```
+
+不要把这些步骤写进 GUI、Packet 或实体类里。实体负责表现，Packet 负责通信，Service 负责规则。
