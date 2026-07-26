@@ -27,5 +27,33 @@
     "slug": "commercial_customization",
     "file": "commercial_customization.md",
     "date": "2026-06-05"
+  },
+  {
+    "title": "SimuKraft 住宅建筑 .sk 自定义教程",
+    "summary": "本文面向整合包开发者，说明如何编写住宅建筑的 .sk 元数据文件，包括床位 POI 声明和多户型划分。",
+    "slug": "residential_customization",
+    "file": "residential_customization.md",
+    "date": "2026-07-26"
+  },
+  {
+    "title": "SimuKraft 医疗建筑自定义教程",
+    "summary": "本文面向整合包开发者，说明如何通过 .sk 配置医疗建筑，以及通过医疗 JSON 配置服务覆盖范围。",
+    "slug": "medical_customization",
+    "file": "medical_customization.md",
+    "date": "2026-07-26"
+  },
+  {
+    "title": "NPC 家庭系统设计与实现文档",
+    "summary": "记录家庭系统（婚姻、生育、成长、搬迁、住宅户划分、居住指数）的完整实现状态，包含数据模型与关键流程说明。",
+    "slug": "family-system",
+    "file": "family-system.md",
+    "date": "2026-07-26"
+  },
+  {
+    "title": "Sim-U-Kraft 接口用法索引",
+    "summary": "说明多人协作时应从哪里调用服务、调用前要验证什么、哪些层不能互相越界，记录当前工程中比较稳定的服务入口。",
+    "slug": "apiuse",
+    "file": "apiuse.md",
+    "date": "2026-07-26"
   }
 ]
