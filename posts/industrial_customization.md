@@ -814,9 +814,9 @@ NPC 会在范围内寻找最近的匹配掉落物，走过去后把可触及的�
 ```json
 {
   "type": "harvest_block_clusters",
-  "targetBlockTag": "minecraft:logs",
-  "attachedBlockTag": "minecraft:leaves",
-  "supportBlockTag": "minecraft:dirt",
+  "targetBlockTag": "#minecraft:logs",
+  "attachedBlockTag": "#minecraft:leaves",
+  "supportBlockTag": "#minecraft:dirt",
   "plantItemTag": "minecraft:saplings",
   "minAttachedBlocks": 4,
   "maxClusterBlocks": 160,
@@ -836,9 +836,9 @@ NPC 会在范围内寻找最近的匹配掉落物，走过去后把可触及的�
 
 | 字段 | 说明 |
 | --- | --- |
-| `targetBlockTag` / `blockTag` | 必填，要采集的主体方块标签，例如 `minecraft:logs` |
-| `attachedBlockTag` | 可选，主体簇附近必须连接的附着方块标签，例如 `minecraft:leaves` |
-| `supportBlockTag` | 可选，根部下方的支撑方块标签，例如 `minecraft:dirt` |
+| `targetBlockTag` / `blockTag` | 必填，要采集的主体方块。`#tag` 语法匹配标签，例如 `"#minecraft:logs"`；无 `#` 前缀视为直接方块 ID，例如 `"minecraft:oak_log"` |
+| `attachedBlockTag` | 可选，主体簇附近必须连接的附着方块。同样支持 `#tag` 或直接方块 ID |
+| `supportBlockTag` | 可选，根部下方的支撑方块。同样支持 `#tag` 或直接方块 ID；不填则允许所有非空气方块作为支撑 |
 | `plantItemTag` | 可选，采集后尝试补种的物品标签，例如 `minecraft:saplings` |
 | `minAttachedBlocks` | 至少需要多少个附着方块，默认 0；伐木建议设为 4，降低误砍玩家木结构的概率 |
 | `maxClusterBlocks` | 单个连通簇最多处理多少个主体方块，默认 96 |
@@ -864,9 +864,9 @@ NPC 会在范围内寻找最近的匹配掉落物，走过去后把可触及的�
 
 ```json
 {
-  "targetBlockTag": "minecraft:logs",
-  "attachedBlockTag": "minecraft:leaves",
-  "supportBlockTag": "minecraft:dirt",
+  "targetBlockTag": "#minecraft:logs",
+  "attachedBlockTag": "#minecraft:leaves",
+  "supportBlockTag": "#minecraft:dirt",
   "plantItemTag": "minecraft:saplings",
   "minAttachedBlocks": 4
 }
@@ -893,7 +893,7 @@ NPC 会在范围内寻找最近的匹配掉落物，走过去后把可触及的�
 | --- | --- |
 | `container` / `output` | 目标容器，默认 `output` |
 | `ticks` | 容器打开后等待多久再入库，默认 1 tick |
-| `itemSpecs` | 可选白名单，只把匹配列表中任意规格的临时携带物存入容器，不在列表中的物品保留在 NPC 背包。不写或写空数组则存入全部物品（向下兼容）。支持精确 ID 和 `#tag` 语法，例如 `"minecraft:beef"`、`"#minecraft:wool"`。 |
+| `itemSpecs` / `items` | 可选白名单，只把匹配列表中任意规格的临时携带物存入容器，不在列表中的物品保留在 NPC 背包。不写或写空数组则存入全部物品（向下兼容）。支持精确 ID 和 `#tag` 语法，例如 `"minecraft:beef"`、`"#minecraft:wool"`。 |
 
 `itemSpecs` 典型用法：避免 NPC 把工具磨损残余、多余食材等不需要入库的物品混入输出箱。每条配方可以写自己的白名单，同一个建筑的不同配方互不干扰。
 
@@ -1387,9 +1387,9 @@ NPC 会等待指定结构坐标中出现目标方块。目标出现前会保持�
         { "type": "set_held_item", "item": "minecraft:iron_axe" },
         {
           "type": "harvest_block_clusters",
-          "targetBlockTag": "minecraft:logs",
-          "attachedBlockTag": "minecraft:leaves",
-          "supportBlockTag": "minecraft:dirt",
+          "targetBlockTag": "#minecraft:logs",
+          "attachedBlockTag": "#minecraft:leaves",
+          "supportBlockTag": "#minecraft:dirt",
           "plantItemTag": "minecraft:saplings",
           "minAttachedBlocks": 4,
           "maxClusterBlocks": 160,
